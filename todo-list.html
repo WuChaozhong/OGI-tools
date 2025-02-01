@@ -1,0 +1,294 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>月历天气管理</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 20px;
+            background-color: white;
+        }
+        .location-select {
+            margin-bottom: 20px;
+        }
+        .calendar {
+            display: grid;
+            grid-template-columns: repeat(7, 1fr);
+            gap: 10px;
+            max-width: 800px;
+            margin: 0 auto;
+        }
+        .day {
+            border: 1px solid #ccc;
+            padding: 10px;
+            text-align: center;
+            cursor: pointer;
+            border-radius: 5px;
+            min-height: 100px;
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+            background-color: white;
+        }
+        .day.past {
+            background-color: #f0f0f0; /* 过去日期背景灰色 */
+            cursor: not-allowed; /* 不可选择 */
+        }
+        .day.has-event {
+            background-color: orange;
+            color: white;
+        }
+        .event-list {
+            font-size: 12px;
+            text-align: left;
+            margin-top: 5px;
+        }
+        .weather-info {
+            font-size: 12px;
+            color: #555;
+            margin-top: 5px;
+        }
+        .modal {
+            display: none;
+            position: fixed;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background-color: white;
+            padding: 20px;
+            border: 1px solid #ccc;
+            box-shadow: 0 0 10px rgba(0, 0, 0, 0.1);
+            z-index: 1000;
+        }
+        .modal input, .modal textarea {
+            margin: 10px 0;
+            padding: 10px;
+            width: 100%;
+        }
+        .modal button {
+            padding: 10px 20px;
+            cursor: pointer;
+        }
+        .overlay {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0, 0, 0, 0.5);
+            z-index: 999;
+        }
+    </style>
+</head>
+<body>
+    <h1>月历天气管理</h1>
+    <div class="location-select">
+        <label for="location">选择地点：</label>
+        <select id="location" onchange="fetchWeather()">
+            <option value="">请选择地点</option>
+        </select>
+    </div>
+    <div class="calendar" id="calendar"></div>
+
+    <!-- 添加事项的模态框 -->
+    <div class="overlay" id="overlay"></div>
+    <div class="modal" id="modal">
+        <h2>添加事项</h2>
+        <input type="time" id="event-time">
+        <textarea id="event-text" placeholder="请输入事项内容"></textarea>
+        <button onclick="saveEvent()">保存</button>
+        <button onclick="closeModal()">取消</button>
+    </div>
+
+    <script>
+        // 存储事件的对象，键为日期，值为事件列表
+        const events = {};
+
+        // 获取DOM元素
+        const calendar = document.getElementById('calendar');
+        const modal = document.getElementById('modal');
+        const overlay = document.getElementById('overlay');
+        const eventTime = document.getElementById('event-time');
+        const eventText = document.getElementById('event-text');
+        const locationSelect = document.getElementById('location');
+
+        let selectedDate = null;
+
+        // 初始化月历
+        function initCalendar() {
+            const date = new Date();
+            const year = date.getFullYear();
+            const month = date.getMonth();
+
+            // 获取当前月份的第一天和最后一天
+            const firstDay = new Date(year, month, 1);
+            const lastDay = new Date(year, month + 1, 0);
+
+            // 清空日历
+            calendar.innerHTML = '';
+
+            // 添加空白格子（如果第一天不是周日）
+            for (let i = 0; i < firstDay.getDay(); i++) {
+                const emptyDay = document.createElement('div');
+                emptyDay.className = 'day';
+                calendar.appendChild(emptyDay);
+            }
+
+            // 添加日期格子
+            for (let day = 1; day <= lastDay.getDate(); day++) {
+                const dayElement = document.createElement('div');
+                dayElement.className = 'day';
+                dayElement.innerHTML = `<div>${day}</div>`;
+
+                // 格式化日期（YYYY-MM-DD）
+                const dateKey = `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+
+                // 如果是当前日期之前的日期，设置为灰色且不可选择
+                const today = new Date();
+                const currentDate = new Date(year, month, day);
+                if (currentDate < today) {
+                    dayElement.classList.add('past');
+                    dayElement.style.pointerEvents = 'none'; // 禁用点击事件
+                }
+
+                // 如果有事件，添加样式和事项内容
+                if (events[dateKey]) {
+                    dayElement.classList.add('has-event');
+                    const eventList = document.createElement('div');
+                    eventList.className = 'event-list';
+                    events[dateKey].forEach(event => {
+                        eventList.innerHTML += `<div>${event.time} - ${event.text}</div>`;
+                    });
+                    dayElement.appendChild(eventList);
+                }
+
+                // 点击日期打开模态框
+                dayElement.addEventListener('click', () => {
+                    selectedDate = dateKey;
+                    openModal();
+                });
+
+                calendar.appendChild(dayElement);
+            }
+        }
+
+        // 打开模态框
+        function openModal() {
+            modal.style.display = 'block';
+            overlay.style.display = 'block';
+        }
+
+        // 关闭模态框
+        function closeModal() {
+            modal.style.display = 'none';
+            overlay.style.display = 'none';
+            eventTime.value = '';
+            eventText.value = '';
+        }
+
+        // 保存事项
+        function saveEvent() {
+            const time = eventTime.value;
+            const text = eventText.value.trim();
+
+            if (!time || !text) {
+                alert('请填写所有字段！');
+                return;
+            }
+
+            // 如果该日期还没有事件列表，初始化一个空数组
+            if (!events[selectedDate]) {
+                events[selectedDate] = [];
+            }
+
+            // 添加新事项
+            events[selectedDate].push({ time, text });
+
+            // 更新日历
+            initCalendar();
+
+            // 关闭模态框
+            closeModal();
+        }
+
+        // 获取天气数据
+        async function fetchWeather() {
+            const location = locationSelect.value;
+            if (!location) return;
+
+            const apiKey = 'YOUR_OPENWEATHERMAP_API_KEY'; // 替换为你的OpenWeatherMap API Key
+            const apiUrl = `https://api.openweathermap.org/data/2.5/forecast?q=${location}&appid=${apiKey}&units=metric&lang=zh_cn`;
+
+            try {
+                const response = await fetch(apiUrl);
+                const data = await response.json();
+
+                // 清空之前的天气信息
+                const days = document.querySelectorAll('.day');
+                days.forEach(day => {
+                    const weatherInfo = day.querySelector('.weather-info');
+                    if (weatherInfo) {
+                        weatherInfo.remove();
+                    }
+                });
+
+                // 显示未来一周的天气
+                const today = new Date();
+                for (let i = 0; i < 7; i++) {
+                    const targetDate = new Date(today);
+                    targetDate.setDate(today.getDate() + i);
+                    const dateKey = `${targetDate.getFullYear()}-${String(targetDate.getMonth() + 1).padStart(2, '0')}-${String(targetDate.getDate()).padStart(2, '0')}`;
+
+                    // 找到对应的日期框
+                    const dayElement = Array.from(document.querySelectorAll('.day')).find(day => {
+                        return day.textContent.includes(targetDate.getDate());
+                    });
+
+                    if (dayElement) {
+                        // 获取当天的天气数据
+                        const weatherData = data.list.find(item => {
+                            const itemDate = new Date(item.dt * 1000);
+                            return itemDate.toDateString() === targetDate.toDateString();
+                        });
+
+                        if (weatherData) {
+                            const weatherInfo = document.createElement('div');
+                            weatherInfo.className = 'weather-info';
+                            weatherInfo.textContent = `${weatherData.weather[0].description} ${weatherData.main.temp}°C`;
+                            dayElement.appendChild(weatherInfo);
+                        }
+                    }
+                }
+            } catch (error) {
+                console.error('获取天气数据失败：', error);
+            }
+        }
+
+        // 加载全球地点
+        async function loadLocations() {
+            const apiKey = 'YOUR_OPENWEATHERMAP_API_KEY'; // 替换为你的OpenWeatherMap API Key
+            const apiUrl = `https://api.openweathermap.org/data/2.5/find?lat=0&lon=0&cnt=1000&appid=${apiKey}`;
+
+            try {
+                const response = await fetch(apiUrl);
+                const data = await response.json();
+                data.list.forEach(city => {
+                    const option = document.createElement('option');
+                    option.value = city.name;
+                    option.textContent = `${city.name}, ${city.sys.country}`;
+                    locationSelect.appendChild(option);
+                });
+            } catch (error) {
+                console.error('加载地点失败：', error);
+            }
+        }
+
+        // 初始化
+        initCalendar();
+        loadLocations();
+    </script>
+</body>
+</html>
